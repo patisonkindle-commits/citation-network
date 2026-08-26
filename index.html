@@ -49,6 +49,10 @@
   .meta { color: #8b949e; margin: 4px 0; }
   .abs { color: #c9d1d9; margin: 6px 0; font-size: 12.5px; line-height: 1.45; }
   .lnk a { color: #58a6ff; margin-right: 10px; }
+  .prow { display: flex; gap: 6px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid #21262d; }
+  .ptit { flex: 1; min-width: 0; line-height: 1.3; }
+  .prow a { text-decoration: none; flex-shrink: 0; }
+  #detail a { color: #58a6ff; }
   hr { border: none; border-top: 1px solid #21262d; margin: 12px 0; }
   @media (max-width: 700px) {
     #main { flex-direction: column; }
@@ -168,9 +172,10 @@ function buildAuthor() {                        // co-authorship view derived fr
   const A = {};
   S.article.nodes.forEach(n => n.authors.forEach(name => {
     const o = A[name] || (A[name] = { id: "a:" + name, name, title: name, papers: 0, cites: 0,
-      seed: n.group === "seed", year: null, src: "", doi: "", oa: "", abs: "", authors: [] });
+      seed: n.group === "seed", year: null, src: "", doi: "", oa: "", abs: "", authors: [], plist: [] });
     o.papers++; o.cites += n.cites;
     if (n.year && (!o.year || n.year > o.year)) o.year = n.year;   // latest paper year -> color-by-year fallback
+    o.plist.push({ id: n.id, title: n.title, year: n.year, cites: n.cites, doi: n.doi, oa: n.oa });
   }));
   let nodes = Object.values(A).sort((a, b) => b.papers - a.papers).slice(0, MAX_AUTHORS);
   const keep = new Set(nodes.map(n => n.id));
@@ -306,6 +311,20 @@ function nodeById(id) {
 function reveal(id) { network.selectNodes([id]); network.focus(id, { scale: 1, animation: true }); detail(id); }
 function detail(id) {
   const n = nodeById(id); if (!n) return;
+  if (S.vw === "author" && n.plist && n.plist.length) {          // author: paper list with links
+    const rows = [...n.plist].sort((a, b) => b.cites - a.cites).map(p =>
+      `<div class="prow"><span class="ptit">${esc(trunc(p.title, 60))}</span>`
+      + `<span class="meta">${p.year ?? "?"} · ${p.cites} cites</span> `
+      + (p.doi ? `<a href="https://doi.org/${esc(p.doi)}" target="_blank" rel="noopener">↗</a>` : "")
+      + (p.oa ? ` <a href="${esc(p.oa)}" target="_blank" rel="noopener">📄</a>` : "")
+      + ` <a href="#" class="jnode" data-id="${esc(p.id)}">🔍</a></div>`
+    ).join("");
+    $("detail").innerHTML =
+      `<b>${esc(n.title)}</b>
+       <div class="meta">🌱${n.seed ? "" : " not"} seed author · ${n.papers} paper(s) in graph · ${n.cites.toLocaleString()} total citations</div>
+       <h3 style="margin:10px 0 4px">Papers (${n.plist.length})</h3>${rows}`;
+    return;
+  }
   $("detail").innerHTML =
     `<b>${esc(n.title)}</b>
      <div class="meta">${n.group === "seed" ? "🌱 seed · " : ""}${S.vw === "author" ? n.papers + " papers · " : ""}${n.year ?? "?"} · ${esc(n.src) || "n/a"} · ${S.vw === "author" ? n.cites + " total citations" : n.cites + " citations"}</div>
@@ -414,6 +433,13 @@ $("fbGo").onclick = findNode;
 $("fq").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); findNode(); } });
 $("top10").addEventListener("click", e => {
   const li = e.target.closest("li"); if (li && li.dataset.id) reveal(li.dataset.id);
+});
+// author panel: 🔍 jumps to the paper node in the article view
+$("detail").addEventListener("click", e => {
+  const a = e.target.closest(".jnode"); if (!a) return;
+  e.preventDefault();
+  document.querySelector('input[name=vw][value=article]').checked = true;
+  S.vw = "article"; applyView(); reveal(a.dataset.id);
 });
 $("f").addEventListener("submit", ev => {
   ev.preventDefault();
