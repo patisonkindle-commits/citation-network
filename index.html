@@ -25,16 +25,35 @@
   }
   #q:focus { outline: none; border-color: #58a6ff; }
   button {
-    padding: 10px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
+    padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
     background: #238636; color: #fff; border: none; border-radius: 8px;
   }
   button:hover { background: #2ea043; }
   button:disabled { opacity: .5; cursor: wait; }
+  .btn2 { background: #21262d; border: 1px solid #30363d; font-weight: 500; }
+  .btn2:hover { background: #30363d; }
   #status { padding: 4px 20px; font-size: 13px; color: #8b949e; min-height: 20px; white-space: pre-line; }
   #legend { padding: 0 20px 6px; font-size: 12px; color: #8b949e; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 10px; }
-  #graph { flex: 1; min-height: 300px; border-top: 1px solid #21262d; }
-  @media (max-width: 600px) { h1 { font-size: 16px; } }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 10px; vertical-align: -1px; }
+  #main { flex: 1; display: flex; min-height: 0; border-top: 1px solid #21262d; }
+  #graph { flex: 1; min-width: 0; min-height: 0; }
+  aside { width: 300px; flex-shrink: 0; border-left: 1px solid #21262d; padding: 10px 12px; overflow-y: auto; font-size: 13px; }
+  aside h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #8b949e; margin: 14px 0 6px; }
+  aside label { color: #c9d1d9; }
+  .in { background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; padding: 5px 8px; font-size: 13px; width: 74px; }
+  .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+  #top10 { padding-left: 18px; margin: 0; }
+  #top10 li { margin: 3px 0; cursor: pointer; line-height: 1.35; }
+  #top10 li:hover { color: #58a6ff; }
+  #detail b { font-size: 14px; }
+  .meta { color: #8b949e; margin: 4px 0; }
+  .abs { color: #c9d1d9; margin: 6px 0; font-size: 12.5px; line-height: 1.45; }
+  .lnk a { color: #58a6ff; margin-right: 10px; }
+  hr { border: none; border-top: 1px solid #21262d; margin: 12px 0; }
+  @media (max-width: 700px) {
+    #main { flex-direction: column; }
+    aside { width: 100%; max-height: 40vh; border-left: none; border-top: 1px solid #21262d; }
+  }
 </style>
 </head>
 <body>
@@ -42,28 +61,63 @@
   <h1>📚 Citation Network <span>Graph</span></h1>
   <div class="sub">Type an English research topic — seeds are fetched from OpenAlex, expanded with citations &amp; references.</div>
   <form id="f">
-    <input id="q" type="text" placeholder='e.g. "transformer neural networks attention"' autocomplete="off">
+    <input id="q" type="text" placeholder='e.g. "transformer neural networks attention"' autocomplete="off" list="hist">
+    <datalist id="hist"></datalist>
     <button id="go" type="submit">Build Graph</button>
   </form>
 </header>
 <div id="status">Enter a topic and press <b>Build Graph</b>.</div>
-<div id="legend">
-  <span class="dot" style="background:#f59e0b"></span>seed article (matches search)
-  <span class="dot" style="background:#58a6ff"></span>cited / citing article
-  · node size = citation count · arrow A→B = A cites B · hover = details
+<div id="legend"></div>
+<div id="main">
+  <div id="graph"></div>
+  <aside>
+    <div class="row">
+      <button type="button" class="btn2" id="exPng">🖼 PNG</button>
+      <button type="button" class="btn2" id="exJson">JSON</button>
+      <button type="button" class="btn2" id="exCsv">CSV</button>
+    </div>
+    <h3>View</h3>
+    <div class="row">
+      <label><input type="radio" name="vw" value="article" checked> Articles</label>
+      <label><input type="radio" name="vw" value="author"> Authors</label>
+    </div>
+    <h3>Color</h3>
+    <div class="row">
+      <label><input type="radio" name="cm" value="seed" checked> Seed</label>
+      <label><input type="radio" name="cm" value="year"> Year</label>
+      <label><input type="radio" name="cm" value="community"> Cluster</label>
+    </div>
+    <h3>Filters</h3>
+    <div class="row"><label>Year</label><input id="fyA" class="in" type="number" placeholder="from"><input id="fyB" class="in" type="number" placeholder="to"></div>
+    <div class="row"><label>Min citations</label><input id="fc" class="in" type="number" placeholder="0"></div>
+    <div class="row"><label><input id="fi" type="checkbox"> hide isolated nodes</label></div>
+    <div class="row">
+      <button type="button" id="fa">Apply</button>
+      <button type="button" class="btn2" id="fr">Reset</button>
+    </div>
+    <h3>Find node</h3>
+    <div class="row"><input id="fq" class="in" style="width:130px" placeholder="title…"><button type="button" class="btn2" id="fbGo">Go</button></div>
+    <h3>Top cited</h3>
+    <ol id="top10"></ol>
+    <hr>
+    <div id="detail"><span class="meta">Click a node for abstract, authors &amp; links.</span></div>
+  </aside>
 </div>
-<div id="graph"></div>
 
 <script>
 "use strict";
 const MAILTO = "patison.kindle@gmail.com";
 const API = "https://api.openalex.org/works";
 const N_SEEDS = 18, MAX_REFS_PER_SEED = 20, MAX_CITING_BATCH = 60,
-      DETAIL_BATCH = 50, CITE_CHUNK = 10, SLEEP_MS = 500;
+      DETAIL_BATCH = 50, CITE_CHUNK = 10, SLEEP_MS = 500, MAX_AUTHORS = 500;
+const PALETTE = ["#f59e0b","#58a6ff","#3fb950","#f85149","#bc8cff","#39c5cf",
+                 "#ffa657","#79c0ff","#d2a8ff","#56d364","#ff7b72","#8b949e"];
 
 const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const shortId = u => u.slice(u.lastIndexOf("/") + 1);
+const trunc = (s, n) => s.length > n ? s.slice(0, n) + "…" : s;
 
 async function apiGet(params) {
   await sleep(SLEEP_MS);                       // free-tier rate-limit politeness
@@ -73,52 +127,251 @@ async function apiGet(params) {
   return r.json();
 }
 
-function nodeAttrs(w, isSeed) {
-  const src = (w.primary_location && w.primary_location.source)
-    ? w.primary_location.source.display_name || "" : "";
-  const year = w.publication_year || "?";
-  const cites = w.cited_by_count || 0;
-  const title = w.display_name || "(untitled)";
-  const el = document.createElement("div");
-  el.style.cssText = "max-width:320px;font-size:13px";
-  el.innerHTML = `<b>${title}</b><br>Year: ${year}<br>` +
-                 `Source: ${src || "n/a"}<br>Citations: ${cites}`;
-  const label = title.length > 38 ? title.slice(0, 38) + "…" : title;
-  return { label, title: el, group: isSeed ? "seed" : "related",
-           _year: year, _src: src, _cites: cites };
+/* ---------------- data shaping ---------------- */
+function decodeAbstract(inv) {
+  if (!inv) return "";
+  const a = [];
+  for (const [w, ix] of Object.entries(inv)) ix.forEach(i => a[i] = w);
+  return a.filter(Boolean).join(" ").replace(/\s+/g, " ").slice(0, 650);
+}
+function meta(w, isSeed) {
+  return {
+    id: w.id,
+    title: w.display_name || "(untitled)",
+    label: trunc(w.display_name || "(untitled)", 38),
+    year: w.publication_year || null,
+    cites: w.cited_by_count || 0,
+    src: (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || "",
+    doi: (w.doi || "").replace("https://doi.org/", ""),
+    oa: (w.open_access && w.open_access.oa_url) || "",
+    authors: (w.authorships || []).map(a => a.author && a.author.display_name).filter(Boolean),
+    abs: decodeAbstract(w.abstract_inverted_index),
+    group: isSeed ? "seed" : "rel"
+  };
+}
+function makeArticle(seeds, records) {
+  const seedSet = new Set(seeds.map(w => w.id));
+  const nodes = [], ids = new Set();
+  seeds.forEach(w => { ids.add(w.id); nodes.push(meta(w, true)); });
+  for (const [id, w] of Object.entries(records)) {
+    if (seedSet.has(id) || ids.has(id)) continue;
+    ids.add(id); nodes.push(meta(w, false));
+  }
+  const edges = [];
+  for (const [id, w] of Object.entries(records)) {
+    if (!ids.has(id)) continue;
+    (w.referenced_works || []).forEach(r => { if (ids.has(r)) edges.push({ from: id, to: r }); });
+  }
+  return { nodes, edges };
+}
+function buildAuthor() {                        // co-authorship view derived from cached article nodes
+  const A = {};
+  S.article.nodes.forEach(n => n.authors.forEach(name => {
+    const o = A[name] || (A[name] = { id: "a:" + name, name, title: name, papers: 0, cites: 0,
+      seed: n.group === "seed", year: null, src: "", doi: "", oa: "", abs: "", authors: [] });
+    o.papers++; o.cites += n.cites;
+    if (n.year && (!o.year || n.year > o.year)) o.year = n.year;   // latest paper year -> color-by-year fallback
+  }));
+  let nodes = Object.values(A).sort((a, b) => b.papers - a.papers).slice(0, MAX_AUTHORS);
+  const keep = new Set(nodes.map(n => n.id));
+  const eset = new Set(), edges = [];
+  S.article.nodes.forEach(n => {
+    const as = n.authors.filter(a => keep.has("a:" + a));
+    for (let i = 0; i < as.length; i++)
+      for (let j = i + 1; j < as.length; j++) {
+        const k = [as[i], as[j]].sort().join("␟");
+        if (!eset.has(k)) { eset.add(k); edges.push({ from: "a:" + as[i], to: "a:" + as[j] }); }
+      }
+  });
+  nodes.forEach(n => { n.label = trunc(n.name, 26); n.title = n.name; n.group = n.seed ? "seed" : "rel"; });
+  return { nodes, edges };
+}
+/* weakly-connected components -> biggest clusters get palette colors */
+function comFn(view) {
+  const p = {}; const find = x => { while (p[x] !== x) x = p[x] = p[p[x]]; return x; };
+  view.nodes.forEach(n => p[n.id] = n.id);
+  view.edges.forEach(e => { if (p[e.from] != null && p[e.to] != null) p[find(e.from)] = find(e.to); });
+  const cnt = {};
+  view.nodes.forEach(n => { const r = find(n.id); cnt[r] = (cnt[r] || 0) + 1; });
+  const rank = new Map(Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])
+        .slice(0, PALETTE.length - 1).map((r, i) => [r, i]));
+  const m = {};
+  view.nodes.forEach(n => m[n.id] = rank.has(find(n.id)) ? rank.get(find(n.id)) : PALETTE.length - 1);
+  return m;
+}
+function grad(t) {                              // year gradient violet -> cyan -> yellow
+  t = Math.max(0, Math.min(1, t));
+  const mix = (a, b, u) => a.map((v, i) => Math.round(v + (b[i] - v) * u));
+  const rgb = t < .5 ? mix([124,58,237],[6,182,212],t*2) : mix([6,182,212],[250,204,21],(t-.5)*2);
+  return `rgb(${rgb})`;
 }
 
-let network = null;
-function render(nodesDs, edgesDs) {
-  const data = { nodes: nodesDs, edges: edgesDs };
+/* ---------------- app state ---------------- */
+const S = { query: "", article: null, author: null, vw: "article", color: "seed", cache: {} };
+let network = null, V = null;
+
+function loadCache() { try { return JSON.parse(localStorage.getItem("cnx") || "{}"); } catch (e) { return {}; } }
+function saveCache(q, data) {
+  try {
+    const c = loadCache(); c[q] = { t: Date.now(), d: data };
+    const keys = Object.keys(c).sort((a, b) => c[a].t - c[b].t);
+    while (keys.length > 8) delete c[keys.shift()];
+    localStorage.setItem("cnx", JSON.stringify(c));
+  } catch (e) {}
+  refreshHist();
+}
+function refreshHist() {
+  const ks = Object.entries(loadCache()).sort((a, b) => b[1].t - a[1].t).map(x => x[0]);
+  $("hist").innerHTML = ks.map(k => `<option value="${esc(k)}">`).join("");
+}
+
+/* ---------------- rendering ---------------- */
+function tip(n) {
+  const d = document.createElement("div");
+  d.style.cssText = "max-width:320px;font-size:13px";
+  d.innerHTML = S.vw === "author"
+    ? `<b>${esc(n.title)}</b><br>Author · ${n.papers} paper(s) in graph${n.seed ? " · 🌱 seed author" : ""}`
+    : `<b>${esc(n.title)}</b><br>Year: ${n.year ?? "?"}<br>Source: ${esc(n.src) || "n/a"}<br>Citations: ${n.cites}`;
+  return d;
+}
+function applyView() {
+  if (!S.article) return;
+  if (S.vw === "author" && !S.author) S.author = buildAuthor();
+  const raw = S.vw === "author" ? S.author : S.article;
+  const minC = Math.max(0, +$("fc").value || 0);
+  const yA = +$("fyA").value || -1e9, yB = +$("fyB").value || 1e9;
+  let ns = raw.nodes.filter(n => n.cites >= minC && (!n.year || (n.year >= yA && n.year <= yB)));
+  const idset = new Set(ns.map(n => n.id));
+  let es = raw.edges.filter(e => idset.has(e.from) && idset.has(e.to));
+  if ($("fi").checked) {
+    const deg = new Set(); es.forEach(e => { deg.add(e.from); deg.add(e.to); });
+    ns = ns.filter(n => deg.has(n.id));
+    const id2 = new Set(ns.map(n => n.id));
+    es = es.filter(e => id2.has(e.from) && id2.has(e.to));
+  }
+  const cf = S.color === "community" ? comFn(raw) : null;
+  const ys = raw.nodes.map(n => n.year).filter(Boolean);
+  const y0 = ys.length ? Math.min(...ys) : 0, y1 = ys.length ? Math.max(...ys) : 0;
+  const maxC = Math.max(...raw.nodes.map(n => n.cites), 1);
+  const maxP = Math.max(...raw.nodes.map(n => n.papers || 0), 1);
+  ns.forEach(n => {
+    n.size = 8 + 34 * Math.sqrt((S.vw === "author" ? n.papers : n.cites) / (S.vw === "author" ? maxP : maxC));
+    n.color = S.color === "seed" ? (n.group === "seed" ? "#f59e0b" : "#58a6ff")
+            : S.color === "community" ? PALETTE[cf[n.id]]
+            : grad(n.year ? (n.year - y0) / Math.max(1, y1 - y0) : 1);
+  });
+  V = { nodes: ns, edges: es, yr: [y0, y1] };
+  render(); topList();
+}
+function render() {
+  const dsN = new vis.DataSet(V.nodes.map(n => ({ id: n.id, label: n.label, size: n.size, color: n.color, title: tip(n) })));
+  const dsE = new vis.DataSet(V.edges.map(e => ({ from: e.from, to: e.to })));
   const options = {
     autoResize: true, height: "100%", width: "100%",
-    physics: {
-      solver: "barnesHut",
-      barnesHut: { gravitationalConstant: -6000, springLength: 140 },
-      stabilization: { iterations: 150 }
-    },
+    physics: { solver: "barnesHut", barnesHut: { gravitationalConstant: -6000, springLength: 140 },
+               stabilization: { iterations: 150 } },
     interaction: { hover: true, tooltipDelay: 120, navigationButtons: true },
     nodes: { shape: "dot", font: { color: "#e6edf3", size: 12 } },
-    edges: { arrows: "to", color: "#30363d" }
+    edges: { arrows: S.vw === "article" ? "to" : "", color: "#30363d" }
   };
   if (network) network.destroy();
-  network = new vis.Network($("graph"), data, options);
+  network = new vis.Network($("graph"), { nodes: dsN, edges: dsE }, options);
+  network.on("click", p => { if (p.nodes.length) detail(p.nodes[0]); });
+  legendUpd();
+}
+function legendUpd() {
+  let h;
+  if (S.color === "seed")
+    h = `<span class="dot" style="background:#f59e0b"></span>${S.vw === "author" ? "seed-article author" : "seed article"}`
+      + `<span class="dot" style="background:#58a6ff"></span>${S.vw === "author" ? "other authors" : "cited / citing article"}`
+      + ` · arrow A→B = cites`;
+  else if (S.color === "community")
+    h = `color = connected cluster (weakly-connected component)`;
+  else
+    h = `color = publication year · <span class="dot" style="background:${grad(0)}"></span>${V.yr[0]}`
+      + ` → <span class="dot" style="background:${grad(1)}"></span>${V.yr[1]}`;
+  h += ` · size = ${S.vw === "author" ? "paper count" : "citation count"} · hover = details · click = abstract`;
+  $("legend").innerHTML = h;
+}
+function topList() {
+  const top = [...V.nodes].sort((a, b) => b.cites - a.cites).slice(0, 10);
+  $("top10").innerHTML = top.map(n =>
+    `<li data-id="${esc(n.id)}">${esc(trunc(n.title, 44))} <span class="meta">(${n.cites})</span></li>`
+  ).join("") || "<li class='meta'>empty</li>";
+}
+function nodeById(id) {
+  return V.nodes.find(n => n.id === id) ||
+         (S.vw === "author" ? S.author : S.article).nodes.find(n => n.id === id);
+}
+function reveal(id) { network.selectNodes([id]); network.focus(id, { scale: 1, animation: true }); detail(id); }
+function detail(id) {
+  const n = nodeById(id); if (!n) return;
+  $("detail").innerHTML =
+    `<b>${esc(n.title)}</b>
+     <div class="meta">${n.group === "seed" ? "🌱 seed · " : ""}${S.vw === "author" ? n.papers + " papers · " : ""}${n.year ?? "?"} · ${esc(n.src) || "n/a"} · ${S.vw === "author" ? n.cites + " total citations" : n.cites + " citations"}</div>
+     ${n.authors && n.authors.length ? `<div class="meta">${esc(n.authors.slice(0, 6).join(", "))}${n.authors.length > 6 ? " et al." : ""}</div>` : ""}
+     ${n.abs ? `<div class="abs">${esc(n.abs)}…</div>` : ""}
+     <div class="lnk">${n.doi ? `<a href="https://doi.org/${esc(n.doi)}" target="_blank" rel="noopener">Open paper ↗</a>` : ""}${n.oa ? `<a href="${esc(n.oa)}" target="_blank" rel="noopener">OA PDF ↗</a>` : ""}</div>`;
+}
+function findNode() {
+  const q = $("fq").value.trim().toLowerCase(); if (!q || !network) return;
+  const n = V.nodes.find(n => n.title.toLowerCase().includes(q));
+  if (n) reveal(n.id);
+  else $("detail").innerHTML = `<span class="meta">no visible node matching “${esc(q)}”</span>`;
 }
 
+/* ---------------- exports ---------------- */
+function fname(ext) {
+  const s = (S.query || "graph").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  return `${s}-${S.vw}.${ext}`;
+}
+function dl(url, name) { const a = document.createElement("a"); a.href = url; a.download = name; a.click(); }
+$("exPng").onclick = () => {
+  if (!network) return;
+  const c = network.canvas.frame.canvas;
+  const o = document.createElement("canvas"); o.width = c.width; o.height = c.height;
+  const x = o.getContext("2d"); x.fillStyle = "#0d1117"; x.fillRect(0, 0, o.width, o.height); x.drawImage(c, 0, 0);
+  o.toBlob(b => dl(URL.createObjectURL(b), fname("png")));
+};
+$("exJson").onclick = () => {
+  if (!V) return;
+  const j = { query: S.query, generated: new Date().toISOString(),
+    nodes: V.nodes.map(n => ({ id: n.id, title: n.title, year: n.year, citations: n.cites, source: n.src, seed: n.group === "seed", authors: n.authors })),
+    links: V.edges.map(e => ({ source: e.from, target: e.to })) };
+  dl(URL.createObjectURL(new Blob([JSON.stringify(j, null, 1)], { type: "application/json" })), fname("json"));
+};
+$("exCsv").onclick = () => {
+  if (!V) return;
+  const rows = [["id","title","year","citations","source","seed"],
+                ...V.nodes.map(n => [n.id, n.title, n.year ?? "", n.cites, n.src, n.group === "seed"])];
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  dl(URL.createObjectURL(new Blob([csv], { type: "text/csv" })), fname("csv"));
+};
+
+/* ---------------- pipeline ---------------- */
+function loadData(article, q) {
+  S.query = q; S.article = article; S.author = null;
+  $("fyA").value = $("fyB").value = $("fc").value = ""; $("fi").checked = false;
+  applyView();
+}
 async function run(query) {
   $("go").disabled = true;
   const status = msg => { $("status").innerHTML = msg; };
   try {
-    // 1) seeds -------------------------------------------------------------
+    const hit = loadCache()[query];
+    if (hit && hit.d && Date.now() - hit.t < 864e5) {
+      loadData(hit.d, query);
+      status(`⚡ Loaded from cache (${new Date(hit.t).toLocaleString()}) — <b>${V.nodes.length}</b> nodes, <b>${V.edges.length}</b> links.`);
+      return;
+    }
+    // 1) seeds
     status("🔎 Searching OpenAlex…");
     const seedRes = await apiGet({ search: query, "per-page": N_SEEDS });
     const seeds = seedRes.results || [];
     if (!seeds.length) throw new Error("No articles found for this query.");
     status(`Found ${seeds.length} seed articles. Collecting citations & references…`);
-
-    // 2) citing works (who cites the seeds), batched OR-filter --------------
-    const records = {};                       // openalex id -> work
+    // 2) citing works
+    const records = {};
     seeds.forEach(w => records[w.id] = w);
     const seedIds = seeds.map(w => shortId(w.id));
     let citing = {};
@@ -131,45 +384,20 @@ async function run(query) {
       (d.results || []).forEach(w => citing[w.id] = w);
     }
     Object.assign(records, citing);
-
-    // references of the seeds -> fetch metadata in batches ------------------
+    // references of the seeds
     const refUrls = [];
-    seeds.forEach(w => (w.referenced_works || []).slice(0, MAX_REFS_PER_SEED)
-                        .forEach(r => refUrls.push(r)));
+    seeds.forEach(w => (w.referenced_works || []).slice(0, MAX_REFS_PER_SEED).forEach(r => refUrls.push(r)));
     for (let i = 0; i < refUrls.length; i += DETAIL_BATCH) {
       status(`Fetching reference metadata… ${Math.min(i + DETAIL_BATCH, refUrls.length)}/${refUrls.length}`);
       const chunk = refUrls.slice(i, i + DETAIL_BATCH).map(shortId).join("|");
       const d = await apiGet({ filter: "ids.openalex:" + chunk, "per-page": DETAIL_BATCH });
       (d.results || []).forEach(w => records[w.id] = w);
     }
-
-    // 3) build graph --------------------------------------------------------
+    // 3) build + render + cache
     status("Building graph…");
-    const nodes = [], edges = [], seen = new Set();
-    function addNode(w, isSeed) {
-      if (seen.has(w.id)) return;
-      seen.add(w.id);
-      nodes.push({ id: w.id, ...nodeAttrs(w, isSeed) });
-    }
-    seeds.forEach(w => addNode(w, true));
-    Object.values(citing).forEach(w => addNode(w, false));
-    // every record carries its referenced_works -> real citation edges
-    for (const [id, w] of Object.entries(records)) {
-      if (!seen.has(id)) continue;
-      (w.referenced_works || []).forEach(ref => {
-        if (seen.has(ref)) edges.push({ from: id, to: ref });
-      });
-    }
-
-    const maxC = Math.max(1, ...nodes.map(n => n._cites));
-    nodes.forEach(n => {
-      n.size = 8 + 34 * Math.sqrt(n._cites / maxC);
-      n.color = n.group === "seed" ? "#f59e0b" : "#58a6ff";
-    });
-
-    render(new vis.DataSet(nodes), new vis.DataSet(edges));
-    status(`✅ Done — <b>${nodes.length}</b> articles, <b>${edges.length}</b> citation links. ` +
-           `Hover a node for title / year / source.`);
+    loadData(makeArticle(seeds, records), query);
+    saveCache(query, S.article);
+    status(`✅ Done — <b>${V.nodes.length}</b> articles, <b>${V.edges.length}</b> citation links. Hover a node; click for abstract &amp; links.`);
   } catch (e) {
     status(`❌ ${e.message}`);
   } finally {
@@ -177,16 +405,30 @@ async function run(query) {
   }
 }
 
+/* ---------------- wiring ---------------- */
+document.querySelectorAll('input[name=vw]').forEach(r => r.onchange = () => { S.vw = r.value; applyView(); });
+document.querySelectorAll('input[name=cm]').forEach(r => r.onchange = () => { S.color = r.value; applyView(); });
+$("fa").onclick = applyView;
+$("fr").onclick = () => { $("fyA").value = $("fyB").value = $("fc").value = ""; $("fi").checked = false; applyView(); };
+$("fbGo").onclick = findNode;
+$("fq").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); findNode(); } });
+$("top10").addEventListener("click", e => {
+  const li = e.target.closest("li"); if (li && li.dataset.id) reveal(li.dataset.id);
+});
 $("f").addEventListener("submit", ev => {
   ev.preventDefault();
-  const q = $("q").value.trim();
-  if (!q) return;
+  const q = $("q").value.trim(); if (!q) return;
   history.replaceState(null, "", "?q=" + encodeURIComponent(q));
   run(q);
 });
-
+refreshHist();
+// deep-link params: ?q=topic&view=author&color=year|community
+const P = new URLSearchParams(location.search);
+const pv = P.get("view"), pc = P.get("color");
+if (pv === "author") { S.vw = "author"; document.querySelector('input[name=vw][value=author]').checked = true; }
+if (pc && ["year", "community"].includes(pc)) { S.color = pc; document.querySelector(`input[name=cm][value=${pc}]`).checked = true; }
 // deep-link support: index.html?q=topic autostarts the search
-const q0 = new URLSearchParams(location.search).get("q");
+const q0 = P.get("q");
 if (q0) { $("q").value = q0; run(q0); } else { $("q").focus(); }
 </script>
 </body>
