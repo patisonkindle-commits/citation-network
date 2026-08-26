@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Citation Network Graph — OpenAlex Explorer</title>
+<meta name="description" content="Interactive citation network graphs built live from the OpenAlex API.">
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0d1117; color: #e6edf3; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  header { padding: 14px 20px 8px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  h1 span { color: #f59e0b; }
+  .sub { color: #8b949e; font-size: 13px; margin-bottom: 10px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  #q {
+    flex: 1; min-width: 220px; padding: 10px 14px; font-size: 15px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3;
+  }
+  #q:focus { outline: none; border-color: #58a6ff; }
+  button {
+    padding: 10px 20px; font-size: 15px; font-weight: 600; cursor: pointer;
+    background: #238636; color: #fff; border: none; border-radius: 8px;
+  }
+  button:hover { background: #2ea043; }
+  button:disabled { opacity: .5; cursor: wait; }
+  #status { padding: 4px 20px; font-size: 13px; color: #8b949e; min-height: 20px; white-space: pre-line; }
+  #legend { padding: 0 20px 6px; font-size: 12px; color: #8b949e; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 4px 0 10px; }
+  #graph { flex: 1; min-height: 300px; border-top: 1px solid #21262d; }
+  @media (max-width: 600px) { h1 { font-size: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 Citation Network <span>Graph</span></h1>
+  <div class="sub">Type an English research topic — seeds are fetched from OpenAlex, expanded with citations &amp; references.</div>
+  <form id="f">
+    <input id="q" type="text" placeholder='e.g. "transformer neural networks attention"' autocomplete="off">
+    <button id="go" type="submit">Build Graph</button>
+  </form>
+</header>
+<div id="status">Enter a topic and press <b>Build Graph</b>.</div>
+<div id="legend">
+  <span class="dot" style="background:#f59e0b"></span>seed article (matches search)
+  <span class="dot" style="background:#58a6ff"></span>cited / citing article
+  · node size = citation count · arrow A→B = A cites B · hover = details
+</div>
+<div id="graph"></div>
+
+<script>
+"use strict";
+const MAILTO = "patison.kindle@gmail.com";
+const API = "https://api.openalex.org/works";
+const N_SEEDS = 18, MAX_REFS_PER_SEED = 20, MAX_CITING_BATCH = 60,
+      DETAIL_BATCH = 50, CITE_CHUNK = 10, SLEEP_MS = 500;
+
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const shortId = u => u.slice(u.lastIndexOf("/") + 1);
+
+async function apiGet(params) {
+  await sleep(SLEEP_MS);                       // free-tier rate-limit politeness
+  const qs = new URLSearchParams({ ...params, mailto: MAILTO });
+  const r = await fetch(`${API}?${qs}`);
+  if (!r.ok) throw new Error(`OpenAlex HTTP ${r.status}`);
+  return r.json();
+}
+
+function nodeAttrs(w, isSeed) {
+  const src = (w.primary_location && w.primary_location.source)
+    ? w.primary_location.source.display_name || "" : "";
+  const year = w.publication_year || "?";
+  const cites = w.cited_by_count || 0;
+  const title = w.display_name || "(untitled)";
+  const el = document.createElement("div");
+  el.style.cssText = "max-width:320px;font-size:13px";
+  el.innerHTML = `<b>${title}</b><br>Year: ${year}<br>` +
+                 `Source: ${src || "n/a"}<br>Citations: ${cites}`;
+  const label = title.length > 38 ? title.slice(0, 38) + "…" : title;
+  return { label, title: el, group: isSeed ? "seed" : "related",
+           _year: year, _src: src, _cites: cites };
+}
+
+let network = null;
+function render(nodesDs, edgesDs) {
+  const data = { nodes: nodesDs, edges: edgesDs };
+  const options = {
+    autoResize: true, height: "100%", width: "100%",
+    physics: {
+      solver: "barnesHut",
+      barnesHut: { gravitationalConstant: -6000, springLength: 140 },
+      stabilization: { iterations: 150 }
+    },
+    interaction: { hover: true, tooltipDelay: 120, navigationButtons: true },
+    nodes: { shape: "dot", font: { color: "#e6edf3", size: 12 } },
+    edges: { arrows: "to", color: "#30363d" }
+  };
+  if (network) network.destroy();
+  network = new vis.Network($("graph"), data, options);
+}
+
+async function run(query) {
+  $("go").disabled = true;
+  const status = msg => { $("status").innerHTML = msg; };
+  try {
+    // 1) seeds -------------------------------------------------------------
+    status("🔎 Searching OpenAlex…");
+    const seedRes = await apiGet({ search: query, "per-page": N_SEEDS });
+    const seeds = seedRes.results || [];
+    if (!seeds.length) throw new Error("No articles found for this query.");
+    status(`Found ${seeds.length} seed articles. Collecting citations & references…`);
+
+    // 2) citing works (who cites the seeds), batched OR-filter --------------
+    const records = {};                       // openalex id -> work
+    seeds.forEach(w => records[w.id] = w);
+    const seedIds = seeds.map(w => shortId(w.id));
+    let citing = {};
+    for (let i = 0; i < seedIds.length; i += CITE_CHUNK) {
+      status(`Collecting citations & references… (seeds ${i + 1}-${Math.min(i + CITE_CHUNK, seedIds.length)} of ${seedIds.length})`);
+      const d = await apiGet({
+        filter: "cites:" + seedIds.slice(i, i + CITE_CHUNK).join("|"),
+        "per-page": MAX_CITING_BATCH, sort: "cited_by_count:desc"
+      });
+      (d.results || []).forEach(w => citing[w.id] = w);
+    }
+    Object.assign(records, citing);
+
+    // references of the seeds -> fetch metadata in batches ------------------
+    const refUrls = [];
+    seeds.forEach(w => (w.referenced_works || []).slice(0, MAX_REFS_PER_SEED)
+                        .forEach(r => refUrls.push(r)));
+    for (let i = 0; i < refUrls.length; i += DETAIL_BATCH) {
+      status(`Fetching reference metadata… ${Math.min(i + DETAIL_BATCH, refUrls.length)}/${refUrls.length}`);
+      const chunk = refUrls.slice(i, i + DETAIL_BATCH).map(shortId).join("|");
+      const d = await apiGet({ filter: "ids.openalex:" + chunk, "per-page": DETAIL_BATCH });
+      (d.results || []).forEach(w => records[w.id] = w);
+    }
+
+    // 3) build graph --------------------------------------------------------
+    status("Building graph…");
+    const nodes = [], edges = [], seen = new Set();
+    function addNode(w, isSeed) {
+      if (seen.has(w.id)) return;
+      seen.add(w.id);
+      nodes.push({ id: w.id, ...nodeAttrs(w, isSeed) });
+    }
+    seeds.forEach(w => addNode(w, true));
+    Object.values(citing).forEach(w => addNode(w, false));
+    // every record carries its referenced_works -> real citation edges
+    for (const [id, w] of Object.entries(records)) {
+      if (!seen.has(id)) continue;
+      (w.referenced_works || []).forEach(ref => {
+        if (seen.has(ref)) edges.push({ from: id, to: ref });
+      });
+    }
+
+    const maxC = Math.max(1, ...nodes.map(n => n._cites));
+    nodes.forEach(n => {
+      n.size = 8 + 34 * Math.sqrt(n._cites / maxC);
+      n.color = n.group === "seed" ? "#f59e0b" : "#58a6ff";
+    });
+
+    render(new vis.DataSet(nodes), new vis.DataSet(edges));
+    status(`✅ Done — <b>${nodes.length}</b> articles, <b>${edges.length}</b> citation links. ` +
+           `Hover a node for title / year / source.`);
+  } catch (e) {
+    status(`❌ ${e.message}`);
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+$("f").addEventListener("submit", ev => {
+  ev.preventDefault();
+  const q = $("q").value.trim();
+  if (!q) return;
+  history.replaceState(null, "", "?q=" + encodeURIComponent(q));
+  run(q);
+});
+
+// deep-link support: index.html?q=topic autostarts the search
+const q0 = new URLSearchParams(location.search).get("q");
+if (q0) { $("q").value = q0; run(q0); } else { $("q").focus(); }
+</script>
+</body>
+</html>
