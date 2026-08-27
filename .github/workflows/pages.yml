@@ -17,11 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Symlink hybrid_research_graph.html as index.html
+        run: cp hybrid_research_graph.html index.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./hybrid_research_graph.html
-          target-dir: index.html
+          path: ./
 
       - id: deployment
         uses: actions/deploy-pages@v4
