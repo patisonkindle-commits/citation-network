@@ -17,5 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./hybrid_research_graph.html
+          target-dir: index.html
+
       - id: deployment
         uses: actions/deploy-pages@v4
